@@ -2,10 +2,9 @@ class SchedulerJob < ApplicationJob
   class_timeout 300
 
   rate '1 minute'
-
   iam_policy("sqs", "ses")
   def scheduler 
-    5.times do
+    3.times do
       prev_ns = Time.now.nsec
       PollerJob.perform_now(:poller)
       delta_ns = Time.now.nsec - prev_ns

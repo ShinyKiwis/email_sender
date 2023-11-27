@@ -3,11 +3,13 @@ source "https://rubygems.org"
 gem "jets", "~> 4.0.0"
 gem 'aws-sdk-ses'
 
+gem 'uuid'
 gem "dynomite"
 gem "zeitwerk", ">= 2.5.0"
 
 # development and test groups are not bundled as part of the deployment
 group :development, :test do
+  gem 'pry'
   # Call 'byebug' anywhere in the code to stop execution and get a debugger console
   gem 'byebug', platforms: [:mri, :mingw, :x64_mingw]
   gem 'shotgun'

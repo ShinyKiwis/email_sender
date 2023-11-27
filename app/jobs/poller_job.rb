@@ -1,3 +1,5 @@
+require 'json'
+
 class PollerJob < ApplicationJob
   class_timeout 300
 
@@ -23,7 +25,11 @@ class PollerJob < ApplicationJob
 
     ses_client = Aws::SES::Client.new
     for message in messages
-      to_address = message.body
+      parsed_message = JSON.parse(message.body, symbolize_names: true)
+      to_address = parsed_message[:to_address]
+      message_subject = parsed_message[:message][:subject]
+      message_body = parsed_message[:message][:body]
+
       ses_client.send_email({
         destination: {
           to_addresses: [
@@ -34,12 +40,12 @@ class PollerJob < ApplicationJob
           body: {
             html: {
               charset: "UTF-8",
-              data: "Test message from <b>SES</b>!"
+              data: message_body 
             }
           },
           subject: {
             charset: "UTF-8",
-            data: "Test email from SES"
+            data: message_subject 
           }
         },
         source: ENV["EMAIL"]
