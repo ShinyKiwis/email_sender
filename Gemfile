@@ -3,6 +3,10 @@ source "https://rubygems.org"
 gem "jets", "~> 4.0.0"
 gem 'aws-sdk-ses'
 
+gem 'aws-sdk-cloudwatchevents'
+
+gem "mongo", "~> 2"
+
 gem 'uuid'
 gem "dynomite"
 gem "zeitwerk", ">= 2.5.0"

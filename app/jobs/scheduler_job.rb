@@ -4,7 +4,16 @@ class SchedulerJob < ApplicationJob
   rate '1 minute'
   iam_policy("sqs", "ses")
   def scheduler 
-    3.times do
+    # Check if queue exist
+    begin
+      sqs_client = Aws::SQS::Client.new 
+      sqs_client.get_queue_url({queue_name: 'email'})
+    rescue Aws::SQS::Errors::NonExistentQueue
+      return
+    end
+    
+    loop_time = 5
+    loop_time.times do
       prev_ns = Time.now.nsec
       PollerJob.perform_now(:poller)
       delta_ns = Time.now.nsec - prev_ns

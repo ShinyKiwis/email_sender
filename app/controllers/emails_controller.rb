@@ -1,12 +1,13 @@
 class EmailsController < ApplicationController
-  include Jets::AwsServices
   def producer
-    sqs_client = Aws::SQS::Client.new
     begin
+      sqs_client = Aws::SQS::Client.new
       queue_url = sqs_client.get_queue_url({queue_name: 'email'})[:queue_url]
-    rescue
-      render json: { data: 'Queue not exist!' }
-      return
+    rescue Aws::SQS::Errors::NonExistentQueue
+      responseonse = sqs_client.create_queue({
+        queue_name: 'email'
+      })
+      queue_url = response.queue_url
     end
 
     messages = params[:data]
