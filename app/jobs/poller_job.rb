@@ -5,6 +5,8 @@ class PollerJob < ApplicationJob
 
   MAX_NUMBER_OF_MESSAGES = 10
   WAIT_TIME_SECONDS = 5
+  
+  MONGO_DATABASE_NAME = "mail_sender"
 
   @@mongo_client = Mongo::Client.new("mongodb+srv://#{ENV["MONGO_USERNAME"]}:#{ENV["MONGO_PASSWORD"]}@cluster0.dcnyfbf.mongodb.net/?retryWrites=true&w=majority")
 
@@ -37,7 +39,7 @@ class PollerJob < ApplicationJob
   private
   def send_email(message)
     ses_client = Aws::SES::Client.new
-    mail_database = @@mongo_client.use("mail_sender")
+    mail_database = @@mongo_client.use(MONGO_DATABASE_NAME)
     sent_list = mail_database["sent_list"]
 
     parsed_message = JSON.parse(message.body, symbolize_names: true)
@@ -76,7 +78,7 @@ class PollerJob < ApplicationJob
   end
 
   def get_user_data(uuid)
-    mail_client = @@mongo_client.use("mail_sender")
+    mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
     users = mail_client["users"]
     user = users.find("_id": BSON::Binary.from_uuid(uuid)).first
     user_data = Hash.new
