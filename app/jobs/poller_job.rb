@@ -40,7 +40,7 @@ class PollerJob < ApplicationJob
   def send_email(message)
     ses_client = Aws::SES::Client.new
     mail_database = @@mongo_client.use(MONGO_DATABASE_NAME)
-    sent_list = mail_database["sent_list"]
+    email_messages = mail_database["email_messages"]
 
     parsed_message = JSON.parse(message.body, symbolize_names: true)
     
@@ -49,11 +49,9 @@ class PollerJob < ApplicationJob
     message_subject = parsed_message[:message][:subject]
     message_body = parsed_message[:message][:body]
 
-    # Generate message body
-    message_body = create_message_for_user(message_body, get_user_data(user_uuid))
+    dynamic_message_body = create_dynamic_message_for_user(message_body, get_user_data(user_uuid))
 
-    if sent_list.find({to_address: to_address}).first.nil?
-      sent_list.insert_one({to_address: to_address})
+    if is_email_sent_to_user?(user_uuid)
       response = ses_client.send_email({
         destination: {
           to_addresses: [
@@ -64,7 +62,7 @@ class PollerJob < ApplicationJob
           body: {
             html: {
               charset: "UTF-8",
-              data: message_body 
+              data: dynamic_message_body 
             }
           },
           subject: {
@@ -74,13 +72,33 @@ class PollerJob < ApplicationJob
         },
         source: ENV["EMAIL"]
       })
+      document = {
+        receiver_id: BSON::Binary.from_uuid(user_uuid),
+        external_id: response.message_id,
+        text_body: message_body,
+        subject: message_subject,
+        email_campaign_id: nil,
+        bounced_at: nil,
+        complained_at: nil,
+        delivered_at: nil,
+        opened_at: nil,
+        clicked_at: nil,
+      }
+      email_messages.insert_one(document)
     end
   end
+  
+  def is_email_sent_to_user?(user_uuid)
+    mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
+    users = mail_client["email_messages"]
+    user = users.find("receiver_id": BSON::Binary.from_uuid(user_uuid))
+    return user.first.nil?
+  end
 
-  def get_user_data(uuid)
+  def get_user_data(user_uuid)
     mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
     users = mail_client["users"]
-    user = users.find("_id": BSON::Binary.from_uuid(uuid)).first
+    user = users.find("_id": BSON::Binary.from_uuid(user_uuid)).first
     user_data = Hash.new
 
     # Not include "_id"
@@ -90,10 +108,11 @@ class PollerJob < ApplicationJob
     return user_data
   end
 
-  def create_message_for_user(message, user_data)
+  def create_dynamic_message_for_user(message, user_data)
+    dynamic_message = message
     user_data.each do |key, value|
-      message.gsub!("{{#{key}}}", value)
+      dynamic_message.gsub("{{#{key}}}", value)
     end
-    return message
+    return dynamic_message
   end
 end
