@@ -3,7 +3,7 @@ source "https://rubygems.org"
 gem "jets", "~> 4.0.0"
 gem 'aws-sdk-ses'
 
-gem 'aws-sdk-cloudwatchevents'
+gem 'honeybadger'
 
 gem "mongo", "~> 2"
 
