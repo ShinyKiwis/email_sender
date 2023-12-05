@@ -1,5 +1,6 @@
 require 'json'
 class PollerJob < ApplicationJob
+  extend ::Honeybadger::Plugins::LambdaExtension
   class_timeout 300
 
   MAX_NUMBER_OF_MESSAGES = 10
@@ -8,6 +9,8 @@ class PollerJob < ApplicationJob
   MONGO_DATABASE_NAME = "mail_sender"
 
   @@mongo_client = Mongo::Client.new("mongodb+srv://#{ENV["MONGO_USERNAME"]}:#{ENV["MONGO_PASSWORD"]}@cluster0.dcnyfbf.mongodb.net/?retryWrites=true&w=majority")
+
+  hb_wrap_handler :poller
 
   iam_policy("sqs", "ses")
   def poller 
@@ -19,25 +22,31 @@ class PollerJob < ApplicationJob
       wait_time_seconds: WAIT_TIME_SECONDS
     })
     
-    begin
-      messages = response.messages
-      raise if messages.length.zero?
-    rescue 
-      return
-    end
+    messages = response.messages
+    return if messages.length.zero?
 
     for message in messages
       parsed_message = JSON.parse(message.body, symbolize_names: true)
       user_uuid = parsed_message[:user_uuid]
 
-      if is_email_not_sent_to_user?(user_uuid)
-        send_email(parsed_message, user_uuid)
-      end
+      begin
+        if is_email_not_sent_to_user?(user_uuid)
+          send_email(parsed_message, user_uuid)
+        end
 
-      sqs_client.delete_message({
-        queue_url: email_queue_url,
-        receipt_handle: message.receipt_handle
-      })
+        sqs_client.delete_message({
+          queue_url: email_queue_url,
+          receipt_handle: message.receipt_handle
+        })
+      rescue NoMethodError => e
+        Honeybadger.notify(e.message, context: {
+          user_uuid: user_uuid
+        })
+      rescue Aws::SES::Errors::MessageRejected => e
+        Honeybadger.notify(e.message)
+      rescue Aws::SES::Errors::LimitExceededException => e 
+        Honeybadger.notify(e.message)
+      end
     end
   end
 
@@ -73,6 +82,7 @@ class PollerJob < ApplicationJob
       },
       source: ENV["EMAIL"]
     })
+
     document = {
       receiver_id: BSON::Binary.from_uuid(user_uuid),
       external_id: response.message_id,
@@ -85,6 +95,7 @@ class PollerJob < ApplicationJob
       opened_at: nil,
       clicked_at: nil,
     }
+
     email_messages.insert_one(document)
   end
   
