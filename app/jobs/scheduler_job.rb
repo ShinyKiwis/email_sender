@@ -7,12 +7,18 @@ class SchedulerJob < ApplicationJob
     # Check if queue exist
     begin
       sqs_client = Aws::SQS::Client.new 
-      sqs_client.get_queue_url({queue_name: 'email'})
+      email_queue_url = sqs_client.get_queue_url({queue_name: 'email'})[:queue_url]
     rescue Aws::SQS::Errors::NonExistentQueue
       return
     end
+
+    messages = sqs_client.receive_message({
+      queue_url: email_queue_url,
+    })[:messages]
+
+    return if messages.length.zero?
     
-    loop_time = 5
+    loop_time = 50
     loop_time.times do
       prev_ns = Time.now.nsec
       PollerJob.perform_now(:poller)
