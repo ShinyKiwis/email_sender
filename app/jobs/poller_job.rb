@@ -107,13 +107,9 @@ class PollerJob < ApplicationJob
     mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
     users = mail_client["users"]
     user = users.find("_id": BSON::Binary.from_uuid(user_uuid)).first
-    user_data = Hash.new
+    user.delete("_id")
 
-    # Not include "_id"
-    user.keys[1..].zip(user.values[1..]).each do |key, value|
-      user_data[key] = value
-    end
-    return user_data
+    return user
   end
 
   def create_dynamic_message_for_user(message, user_data)
