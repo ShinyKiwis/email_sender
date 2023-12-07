@@ -33,20 +33,17 @@ class PollerJob < ApplicationJob
         if is_email_not_sent_to_user?(user_uuid)
           send_email(parsed_message, user_uuid)
         end
-
-        sqs_client.delete_message({
-          queue_url: email_queue_url,
-          receipt_handle: message.receipt_handle
-        })
-      rescue NoMethodError => e
-        Honeybadger.notify(e.message, context: {
-          user_uuid: user_uuid
-        })
       rescue Aws::SES::Errors::MessageRejected => e
         Honeybadger.notify(e.message)
       rescue Aws::SES::Errors::LimitExceededException => e 
+        # Keep the message in queue to retry later
         Honeybadger.notify(e.message)
+        return
       end
+      sqs_client.delete_message({
+        queue_url: email_queue_url,
+        receipt_handle: message.receipt_handle
+      })
     end
   end
 
