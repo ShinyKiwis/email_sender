@@ -1,4 +1,5 @@
 require 'json'
+
 class PollerJob < ApplicationJob
   extend ::Honeybadger::Plugins::LambdaExtension
   class_timeout 300
@@ -27,16 +28,19 @@ class PollerJob < ApplicationJob
 
     for message in messages
       parsed_message = JSON.parse(message.body, symbolize_names: true)
-      user_uuid = parsed_message[:user_uuid]
+      user_id = parsed_message[:user_id]
+      template_id = parsed_message[:template_id]
 
       begin
-        if is_email_not_sent_to_user?(user_uuid)
-          send_email(parsed_message, user_uuid)
+        if is_email_not_sent_to_user?(user_id)
+          email_message = prepare_email_message(user_id, template_id)
+          message_id = send_email(email_message, user_id)
+          add_user_message_to_sent_list(message_id, user_id, email_message)
         end
       rescue Aws::SES::Errors::MessageRejected => e
         Honeybadger.notify(e.message)
       rescue Aws::SES::Errors::LimitExceededException => e 
-        # Keep the message in queue to retry later
+        # Keep the message in the queue to retry later
         Honeybadger.notify(e.message)
         return
       end
@@ -48,43 +52,63 @@ class PollerJob < ApplicationJob
   end
 
   private
-  def send_email(parsed_message, user_uuid)
+  def send_email(email_message, user_id)
     ses_client = Aws::SES::Client.new
-    mail_database = @@mongo_client.use(MONGO_DATABASE_NAME)
-    email_messages = mail_database["email_messages"]
-
-    to_address = parsed_message[:to_address]
-    message_subject = parsed_message[:message][:subject]
-    message_body = parsed_message[:message][:body]
-
-    dynamic_message_body = create_dynamic_message_for_user(message_body, get_user_data(user_uuid))
 
     response = ses_client.send_email({
       destination: {
         to_addresses: [
-          to_address
+          email_message[:to]
         ]
       },
       message: {
         body: {
           html: {
             charset: "UTF-8",
-            data: dynamic_message_body 
+            data: email_message[:html_body]
           }
         },
         subject: {
           charset: "UTF-8",
-          data: message_subject 
+          data: email_message[:subject]
         }
       },
       source: ENV["EMAIL"]
     })
 
-    document = {
-      receiver_id: BSON::Binary.from_uuid(user_uuid),
-      external_id: response.message_id,
-      text_body: message_body,
+    return response.message_id
+  end
+
+  def prepare_email_message(user_id, template_id)
+    mail_database = @@mongo_client.use(MONGO_DATABASE_NAME)
+    email_templates = mail_database["campaign_mail_templates"]
+    
+    campaign_email_template = email_templates.find(id: template_id.to_i).first
+
+    user_data = get_user_data(user_id)
+    to_address = user_data[:email]
+    message_subject = campaign_email_template["subject"]
+    message_body = campaign_email_template["template"]
+
+    dynamic_message_body = create_dynamic_message_for_user(message_body, user_data)
+
+    return {
+      to: to_address,
       subject: message_subject,
+      html_body: message_body,
+      text_body: ""
+    }
+  end
+
+  def add_user_message_to_sent_list(message_id, user_id, email_message)
+    mail_database = @@mongo_client.use(MONGO_DATABASE_NAME)
+    email_messages = mail_database["email_messages"]
+
+    document = {
+      receiver_id: user_id.to_i,
+      external_id: message_id,
+      text_body: email_message[:html_body],
+      subject: email_message[:subject],
       email_campaign_id: nil,
       bounced_at: nil,
       complained_at: nil,
@@ -96,17 +120,17 @@ class PollerJob < ApplicationJob
     email_messages.insert_one(document)
   end
   
-  def is_email_not_sent_to_user?(user_uuid)
+  def is_email_not_sent_to_user?(user_id)
     mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
     users = mail_client["email_messages"]
-    user = users.find("receiver_id": BSON::Binary.from_uuid(user_uuid))
+    user = users.find("receiver_id": user_id.to_i)
     return user.first.nil?
   end
 
-  def get_user_data(user_uuid)
+  def get_user_data(user_id)
     mail_client = @@mongo_client.use(MONGO_DATABASE_NAME)
     users = mail_client["users"]
-    user = users.find("_id": BSON::Binary.from_uuid(user_uuid)).first
+    user = users.find("id": user_id.to_i).first
     user.delete("_id")
 
     return user
@@ -115,7 +139,7 @@ class PollerJob < ApplicationJob
   def create_dynamic_message_for_user(message, user_data)
     dynamic_message = message
     user_data.each do |key, value|
-      dynamic_message.gsub!("{{#{key}}}", value)
+      dynamic_message.gsub!("{{#{key}}}", value.to_s)
     end
     return dynamic_message
   end
