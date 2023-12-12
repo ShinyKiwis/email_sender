@@ -1,3 +1,5 @@
+require 'uuid'
+
 class EmailsController < ApplicationController
   def producer
     begin
@@ -11,12 +13,11 @@ class EmailsController < ApplicationController
     end
 
     messages = params[:messages]
+
     batch_messages = []
-    
     messages.each do |message|
-      uuid = UUID.new
       batch_messages.push({
-        id: uuid.generate, 
+        id: UUID.generate, 
         message_body: message.to_json 
       })
     end
